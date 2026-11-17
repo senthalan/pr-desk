@@ -1,6 +1,6 @@
 // Fetches PR state for every repo in pr-desk.config.json and writes, under
 // public/data/:
-//   pr-board.json  what the page reads: open PRs, recent merges, config
+//   pr-board.json  what the page reads first: open PRs and the config
 //   history.json   every merged PR, compact (Trends view); extended each run
 //   state.json     conflict tracking carried to the next run
 //
@@ -20,7 +20,6 @@ import {
   HISTORY_VERSION,
   type HistoryFile,
   type HistoryRow,
-  type RawMergedPr,
   type RawPr,
   type RepoHistory,
   type RawPrEvent,
@@ -237,7 +236,6 @@ async function updateHistory(
   gql: Gql,
   repo: string,
   prev: RepoHistory | undefined,
-  recentMergedDays: number,
   bots: string[],
 ): Promise<RepoHistory> {
   const { owner, name } = splitRepo(repo);
@@ -263,9 +261,8 @@ async function updateHistory(
 
   // Recent walk. mergedAt <= updatedAt, so stopping on updatedAt can't skip a
   // recent merge. Six hours of overlap absorbs clock skew and late indexing.
-  const since = prev?.syncedAt
-    ? new Date(Date.parse(prev.syncedAt) - 6 * 3_600_000).toISOString()
-    : new Date(Date.now() - recentMergedDays * DAY_MS).toISOString();
+  // On the first run the backfill covers everything, so one day is plenty.
+  const since = new Date((prev?.syncedAt ? Date.parse(prev.syncedAt) : Date.now() - DAY_MS) - 6 * 3_600_000).toISOString();
   let cursor: string | null = null;
   let recentPages = 0;
   for (; recentPages < 200; recentPages++) {
@@ -360,31 +357,13 @@ async function main() {
   for (const repo of config.repos) {
     const [o, h] = await Promise.all([
       fetchOpen(gql, repo, config.bots),
-      updateHistory(gql, repo, prevHistory[repo], config.recentMergedDays, config.bots),
+      updateHistory(gql, repo, prevHistory[repo], config.bots),
     ]);
     console.log(`${repo}: ${o.length} open`);
     open.push(...o);
     history.repos[repo] = h;
   }
 
-  // The board's Merged column comes from the history; the full history is a
-  // separate file the page loads on demand.
-  const recentCutoff = Date.now() / 1000 - config.recentMergedDays * 86_400;
-  const merged: RawMergedPr[] = Object.entries(history.repos).flatMap(([repo, h]) =>
-    h.rows
-      .filter((r) => r[4] >= recentCutoff)
-      .map(([number, title, author, created, mergedAt, mergedBy, first]) => ({
-        repo,
-        number,
-        title,
-        url: `https://github.com/${repo}/pull/${number}`,
-        author,
-        createdAt: new Date(created * 1000).toISOString(),
-        mergedAt: new Date(mergedAt * 1000).toISOString(),
-        mergedBy,
-        firstResponseAt: first != null ? new Date(first * 1000).toISOString() : null,
-      })),
-  );
   const state = applyState(open, prevState);
 
   const snapshot: Snapshot = {
@@ -393,7 +372,6 @@ async function main() {
     host: process.env.GITHUB_REPOSITORY ?? null,
     config,
     open,
-    merged,
   };
   await writeJson(BOARD_FILE, snapshot);
   await writeJson(STATE_FILE, state);
@@ -401,7 +379,7 @@ async function main() {
 
   const { calls, lastRemaining } = usage();
   console.log(
-    `Wrote ${BOARD_FILE}: ${open.length} open, ${merged.length} recently merged ` +
+    `Wrote ${BOARD_FILE}: ${open.length} open, ${Object.values(history.repos).reduce((n, h) => n + h.rows.length, 0)} merged in history ` +
       `— ${calls} API calls in ${((Date.now() - t0) / 1000).toFixed(1)}s` +
       (lastRemaining != null ? `, ${lastRemaining} left this hour` : ""),
   );

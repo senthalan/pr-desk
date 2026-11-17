@@ -3,7 +3,7 @@
 
 import type { PrDeskConfig } from "./config";
 
-export const SNAPSHOT_VERSION = 3;
+export const SNAPSHOT_VERSION = 4;
 
 export type RawPrEvent =
   | { kind: "commit"; at: string; merge: boolean }
@@ -38,19 +38,6 @@ export type RawPr = {
   conflictResolvedAt: string | null;
 };
 
-export type RawMergedPr = {
-  repo: string;
-  number: number;
-  title: string;
-  url: string;
-  author: string;
-  createdAt: string;
-  mergedAt: string;
-  mergedBy: string | null;
-  // First review or comment by someone other than the author (bots excluded).
-  firstResponseAt: string | null;
-};
-
 export type Snapshot = {
   version: typeof SNAPSHOT_VERSION;
   generatedAt: string;
@@ -59,7 +46,6 @@ export type Snapshot = {
   host: string | null;
   config: PrDeskConfig;
   open: RawPr[];
-  merged: RawMergedPr[];
 };
 
 // public/data/history.json — every merged PR, kept compact. Backfilled once

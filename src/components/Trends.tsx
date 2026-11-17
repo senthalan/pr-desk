@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { PrDeskConfig } from "../lib/config";
 import { groupLabel } from "../lib/derive";
-import { PERIODS, computeTrends, groupKeys, type Period, type Trends as TrendsData } from "../lib/trends";
+import { PERIODS, computeTrends, groupKeys, mergedInMonth, type Period, type Trends as TrendsData } from "../lib/trends";
 import type { HistoryFile } from "../lib/snapshot";
-import { formatHours } from "./Parts";
+import { Avatar, formatHours } from "./Parts";
 
 // Color follows the group, never its rank: community is slot 1, then groups
 // in config order. Past eight, groups share a neutral.
@@ -84,7 +84,9 @@ function Legend({ series }: { series: Series[] }) {
   );
 }
 
-function MergedChart({ data, series }: { data: TrendsData; series: Series[] }) {
+type Selectable = { selected: string | null; onSelect: (month: string) => void };
+
+function MergedChart({ data, series, selected, onSelect }: { data: TrendsData; series: Series[] } & Selectable) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const months = data.months;
@@ -112,7 +114,10 @@ function MergedChart({ data, series }: { data: TrendsData; series: Series[] }) {
           let base = 0;
           const segs = series.filter((s) => (m.merged[s.key] ?? 0) > 0);
           return (
-            <g key={m.month} opacity={hover == null || hover === i ? 1 : 0.55}>
+            <g
+              key={m.month}
+              opacity={(hover != null ? hover === i : selected == null || selected === m.month) ? 1 : 0.45}
+            >
               {segs.map((s, j) => {
                 const v = m.merged[s.key] ?? 0;
                 const top = y(base + v);
@@ -138,7 +143,17 @@ function MergedChart({ data, series }: { data: TrendsData; series: Series[] }) {
                 height={plotH}
                 fill="transparent"
                 tabIndex={0}
-                aria-label={`${monthLabel(m.month, true)}: ${totals[i]} merged`}
+                role="button"
+                aria-pressed={selected === m.month}
+                aria-label={`${monthLabel(m.month, true)}: ${totals[i]} merged. Show these PRs.`}
+                style={{ cursor: "pointer" }}
+                onClick={() => onSelect(m.month)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(m.month);
+                  }
+                }}
                 onPointerEnter={() => setHover(i)}
                 onPointerLeave={() => setHover(null)}
                 onFocus={() => setHover(i)}
@@ -163,7 +178,7 @@ function MergedChart({ data, series }: { data: TrendsData; series: Series[] }) {
   );
 }
 
-function ResponseChart({ data, series }: { data: TrendsData; series: Series[] }) {
+function ResponseChart({ data, series, selected, onSelect }: { data: TrendsData; series: Series[] } & Selectable) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const months = data.months;
@@ -189,6 +204,8 @@ function ResponseChart({ data, series }: { data: TrendsData; series: Series[] })
         height={H}
         role="img"
         aria-label="Median time to first response per month, in days"
+        style={{ cursor: "pointer" }}
+        onClick={() => hover != null && months[hover] && onSelect(months[hover].month)}
         onPointerMove={(e) => {
           const box = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
           const i = Math.floor((e.clientX - box.left - PAD.left) / step);
@@ -209,6 +226,10 @@ function ResponseChart({ data, series }: { data: TrendsData; series: Series[] })
             </text>
           ) : null,
         )}
+        {(() => {
+          const si = months.findIndex((m) => m.month === selected);
+          return si >= 0 ? <line x1={x(si)} x2={x(si)} y1={PAD.top} y2={PAD.top + plotH} stroke="var(--muted)" strokeWidth={1} /> : null;
+        })()}
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={PAD.top} y2={PAD.top + plotH} stroke="var(--axis)" strokeWidth={1} />}
         {series.map((s) => {
           // Break the line at months with no responses for this group.
@@ -279,6 +300,17 @@ export function Trends({
 }) {
   const [period, setPeriod] = useState<Period>("12m");
   const [showTable, setShowTable] = useState(false);
+  const [month, setMonth] = useState<string | null>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const monthPrs = useMemo(
+    () => (history && month ? mergedInMonth(history, config, month, group, repo) : []),
+    [history, config, month, group, repo],
+  );
+  const selectMonth = (m: string) => setMonth((cur) => (cur === m ? null : m));
+  // Bring the list into view once it has rendered for the chosen month.
+  useEffect(() => {
+    if (month) listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [month]);
   const data = useMemo(() => (history ? computeTrends(history, config, now, period, repo) : null), [history, config, now, period, repo]);
 
   const all = groupKeys(config).map((k) => ({ key: k, label: groupLabel(config, k), color: seriesColor(config, k) }));
@@ -329,7 +361,12 @@ export function Trends({
           <h2 className="text-sm font-semibold">Merged pull requests per month</h2>
           <Legend series={series} />
         </div>
-        {data.months.length ? <MergedChart data={data} series={series} /> : <p className="text-sm text-muted py-8 text-center">No merged PRs in this period.</p>}
+        <p className="text-xs text-muted mb-2">Click a month to list the PRs merged in it.</p>
+        {data.months.length ? (
+          <MergedChart data={data} series={series} selected={month} onSelect={selectMonth} />
+        ) : (
+          <p className="text-sm text-muted py-8 text-center">No merged PRs in this period.</p>
+        )}
       </section>
 
       <section className="bg-panel border border-border rounded p-4">
@@ -340,8 +377,70 @@ export function Trends({
         <p className="text-xs text-muted mb-2">
           From opening to the first review or comment by someone other than the author, for PRs merged that month.
         </p>
-        {data.months.length ? <ResponseChart data={data} series={series} /> : <p className="text-sm text-muted py-8 text-center">No merged PRs in this period.</p>}
+        {data.months.length ? (
+          <ResponseChart data={data} series={series} selected={month} onSelect={selectMonth} />
+        ) : (
+          <p className="text-sm text-muted py-8 text-center">No merged PRs in this period.</p>
+        )}
       </section>
+
+      {month && (
+        <section ref={listRef} className="bg-panel border border-border rounded scroll-mt-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-3 pb-2">
+            <h2 className="text-sm font-semibold">
+              {monthPrs.length} PR{monthPrs.length === 1 ? "" : "s"} merged in {monthLabel(month, true)}
+              {group !== ALL ? <span className="font-normal text-muted"> · {groupLabel(config, group)}</span> : null}
+            </h2>
+            <button onClick={() => setMonth(null)} className="text-xs text-muted underline hover:text-fg">
+              Close
+            </button>
+          </div>
+          {monthPrs.length === 0 ? (
+            <p className="px-4 pb-4 text-sm text-muted">No PRs from this group were merged that month.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[760px]">
+                <thead className="text-muted text-xs border-y border-border">
+                  <tr>
+                    <th className="text-left font-normal px-3 py-2">Pull request</th>
+                    <th className="text-left font-normal px-3 py-2 w-48">Author</th>
+                    <th className="text-left font-normal px-3 py-2 w-24">Merged</th>
+                    <th className="text-right font-normal px-3 py-2 w-28">First response</th>
+                    <th className="text-right font-normal px-3 py-2 w-28">Time to merge</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthPrs.map((p) => (
+                    <tr key={`${p.repo}#${p.number}`} className="border-b border-border last:border-b-0 align-top">
+                      <td className="px-3 py-2 min-w-0">
+                        <a href={p.url} target="_blank" rel="noreferrer" className="hover:underline block truncate max-w-[480px]" title={p.title}>
+                          <span className="text-muted font-mono text-xs mr-1.5">
+                            {config.repos.length > 1 ? p.repo.split("/")[1] : ""}#{p.number}
+                          </span>
+                          {p.title}
+                        </a>
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        <span className="flex items-center gap-1.5">
+                          <Avatar login={p.author} size={16} />
+                          <span className="font-mono truncate">@{p.author}</span>
+                        </span>
+                        {group === ALL && <span className="text-muted">{groupLabel(config, p.group)}</span>}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted whitespace-nowrap" title={new Date(p.mergedAt * 1000).toLocaleString()}>
+                        {new Date(p.mergedAt * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        {p.mergedBy ? <span className="block">by @{p.mergedBy}</span> : null}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-xs">{p.firstResponseH == null ? "none" : formatHours(p.firstResponseH)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-xs">{formatHours(p.timeToMergeH)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {group === ALL && (
         <section className="bg-panel border border-border rounded overflow-x-auto">

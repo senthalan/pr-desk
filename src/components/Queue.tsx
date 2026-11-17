@@ -84,12 +84,10 @@ export function Queue({
                         <Avatar login={pr.author} size={16} />
                         <span className="font-mono">@{pr.author}</span>
                         {showGroup && <span>· {groupLabel(pr.group)}</span>}
-                        {pr.stage !== "merged" && (
-                          <span className="font-mono">
-                            · <span className="text-ok-fg">+{pr.additions}</span>{" "}
-                            <span className="text-danger-fg">−{pr.deletions}</span>
-                          </span>
-                        )}
+                        <span className="font-mono">
+                          · <span className="text-ok-fg">+{pr.additions}</span>{" "}
+                          <span className="text-danger-fg">−{pr.deletions}</span>
+                        </span>
                         <PrBadges pr={pr} />
                       </div>
                     </td>
@@ -103,11 +101,7 @@ export function Queue({
                       <WaitChip pr={pr} />
                     </td>
                     <td className="px-3 py-2.5">
-                      {pr.stage === "merged" ? (
-                        pr.mergedBy ? <Avatar login={pr.mergedBy} /> : null
-                      ) : (
-                        <AvatarStack logins={pr.reviewers} />
-                      )}
+                      <AvatarStack logins={pr.reviewers} />
                     </td>
                   </tr>
                 ))}

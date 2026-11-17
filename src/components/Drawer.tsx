@@ -9,7 +9,6 @@ import {
   TURN_LABELS,
   WaitChip,
   eventLabel,
-  formatSpan,
 } from "./Parts";
 
 const GROUP_SOURCE_LABEL = {
@@ -59,19 +58,7 @@ export function Drawer({
         <p className="mt-2 text-xs text-muted">{STAGE_HINTS[pr.stage]}</p>
 
         <dl className="mt-4 grid grid-cols-[110px_1fr] gap-y-2 text-sm">
-          {pr.stage === "merged" ? (
-            <>
-              <dt className="text-muted">Merged</dt>
-              <dd>
-                {when(pr.mergedAt ?? null)}
-                {pr.mergedBy ? ` by @${pr.mergedBy}` : ""}
-                <span className="text-xs text-muted">
-                  {" "}· open {formatSpan((Date.parse(pr.mergedAt ?? pr.createdAt) - Date.parse(pr.createdAt)) / 86_400_000)}
-                </span>
-              </dd>
-            </>
-          ) : (
-            <>
+          <>
               <dt className="text-muted">Turn</dt>
               <dd title={TURN_HINTS[pr.turn]}>{TURN_LABELS[pr.turn]}</dd>
               <dt className="text-muted">Waiting</dt>
@@ -94,8 +81,7 @@ export function Drawer({
                   <dd className="text-xs">resolved {when(pr.conflictResolvedAt)}</dd>
                 </>
               )}
-            </>
-          )}
+          </>
           <dt className="text-muted">Author</dt>
           <dd className="flex items-center gap-1.5">
             <Avatar login={pr.author} />
@@ -112,7 +98,6 @@ export function Drawer({
               </a>
             )}
           </dd>
-          {pr.stage !== "merged" && (
             <>
               <dt className="text-muted">Approved by</dt>
               <dd><AvatarStack logins={pr.approvers} max={8} /></dd>
@@ -127,7 +112,6 @@ export function Drawer({
               <dt className="text-muted">Checks</dt>
               <dd className="text-xs">{pr.ciState ? pr.ciState.toLowerCase() : "none"}</dd>
             </>
-          )}
           {pr.labels.length > 0 && (
             <>
               <dt className="text-muted">Labels</dt>

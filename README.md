@@ -20,7 +20,6 @@ Every open PR is placed in one stage, by whose move it is:
 | **Approved** | Approved and mergeable | Maintainer |
 | **Approved · conflicts** | Approved, but conflicts with the base branch | Us, if the author allows maintainer edits; otherwise the author |
 | **Conflicts** | Conflicts and not approved | Author |
-| **Merged** | Merged recently | — |
 
 Conflicts are checked first, so a conflicting PR never shows as Approved or
 On author. Approved PRs with conflicts are pinned to the top of the queue,
@@ -41,7 +40,19 @@ On top of that:
 - **Trends** over your whole merged history: merged PRs per month, median
   time to first response per month, and per-group figures (first response
   median and p90, share answered within target, time to merge) for the last
-  90 days, 6 months, 12 months or all time.
+  90 days, 6 months, 12 months or all time. Click a month in either chart to
+  list the PRs merged that month, with who merged them, time to first
+  response and time to merge.
+
+### What each view covers
+
+| View | Shows |
+| --- | --- |
+| **Queue** and **Board** | Every open PR (drafts behind a toggle). No merged PRs. |
+| **Trends** | Every merged PR since the repo's first one, by month and group. |
+
+Bot PRs (Dependabot, Copilot, your `bots` list, …) are left out everywhere,
+so counts are a little lower than GitHub's.
 
 ## Set it up for your project
 
@@ -76,7 +87,6 @@ Your desk is then at `https://<owner>.github.io/<repo>/`.
   "defaultView": "community",
   "targets": { "firstReviewDays": 2, "reReviewDays": 2, "mergeDays": 1 },
   "businessDays": { "timezone": "Europe/Berlin", "weekendDays": [5, 6] },
-  "recentMergedDays": 14,
   "bots": ["acme-release-bot"]
 }
 ```
@@ -93,7 +103,6 @@ Your desk is then at `https://<owner>.github.io/<repo>/`.
 | `targets` | `2 / 2 / 1` | Business days allowed for a first review, a re-review after an update, and merging an approved PR. |
 | `businessDays.timezone` | `"UTC"` | IANA timezone that defines your working days. |
 | `businessDays.weekendDays` | `[5, 6]` | Days off, **Monday-first**: `0` = Mon … `6` = Sun. |
-| `recentMergedDays` | `14` | How long merged PRs stay on the board's Merged column. Trends always cover the full history. |
 | `bots` | `[]` | Extra logins to ignore, on top of the built-in list (Dependabot, Renovate, Copilot, CodeRabbit, …). |
 
 An author's group comes only from these lists: listed in a group's `members`

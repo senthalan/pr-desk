@@ -51,8 +51,6 @@ export const ConfigSchema = z.object({
       weekendDays: z.array(z.number().int().min(0).max(6)).default([5, 6]),
     })
     .default({ timezone: "UTC", weekendDays: [5, 6] }),
-  // How long merged PRs stay on the board.
-  recentMergedDays: z.number().int().min(1).max(60).default(14),
   // Extra logins to treat as bots, on top of the built-in list.
   bots: z.array(z.string()).default([]),
 });

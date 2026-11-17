@@ -92,3 +92,7 @@ html, body {
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Chart months are focusable buttons: show the ring for keyboard focus only. */
+svg [role="button"]:focus { outline: none; }
+svg [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

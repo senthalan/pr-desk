@@ -4,7 +4,6 @@ import {
   STAGE_HINTS,
   STAGE_LABELS,
   STAGE_ORDER,
-  deriveMerged,
   derivePr,
   groupLabel,
   type DerivedPr,
@@ -37,10 +36,6 @@ function byUrgency(a: DerivedPr, b: DerivedPr): number {
   const rb = b.sla ? SLA_RANK[b.sla] : 3;
   if (ra !== rb) return ra - rb;
   return (b.waitingDays ?? 0) - (a.waitingDays ?? 0);
-}
-
-function byMergedDesc(a: DerivedPr, b: DerivedPr): number {
-  return (b.mergedAt ?? "").localeCompare(a.mergedAt ?? "");
 }
 
 function readPref(key: string): string | null {
@@ -144,12 +139,7 @@ export function App() {
   const derived = useMemo(() => {
     if (!snap) return [] as DerivedPr[];
     const ctx = { now, config: snap.config };
-    const mergedCutoff = new Date(now - snap.config.recentMergedDays * 86_400_000).toISOString();
-    const prs = [
-      ...snap.open.map((p) => derivePr(p, ctx)),
-      ...snap.merged.filter((m) => m.mergedAt >= mergedCutoff).map((m) => deriveMerged(m, ctx)),
-    ];
-    return prs;
+    return snap.open.map((p) => derivePr(p, ctx));
   }, [snap, now]);
 
   // Recent first-response figures for the tile, from the full history.
@@ -172,7 +162,7 @@ export function App() {
 
   const reviewerOptions = useMemo(() => {
     const s = new Set<string>();
-    for (const p of inScope) if (p.stage !== "merged") for (const l of reviewSide(p)) s.add(l);
+    for (const p of inScope) for (const l of reviewSide(p)) s.add(l);
     if (reviewer) s.add(reviewer);
     return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   }, [inScope, reviewer]);
@@ -197,14 +187,14 @@ export function App() {
     const m = new Map<Stage, DerivedPr[]>();
     for (const s of [...STAGE_ORDER, "draft" as Stage]) m.set(s, []);
     for (const p of filtered) m.get(p.stage)!.push(p);
-    for (const [s, list] of m) list.sort(s === "merged" ? byMergedDesc : byUrgency);
+    for (const list of m.values()) list.sort(byUrgency);
     return m;
   }, [filtered]);
 
   const tabCounts = useMemo(() => {
     const c: Record<string, number> = { [ALL]: 0 };
     for (const p of derived) {
-      if (p.stage === "merged" || p.stage === "draft" || (repo && p.repo !== repo)) continue;
+      if (p.stage === "draft" || (repo && p.repo !== repo)) continue;
       c[ALL]++;
       c[p.group] = (c[p.group] ?? 0) + 1;
     }
@@ -212,7 +202,7 @@ export function App() {
   }, [derived, repo]);
 
   const kpis = useMemo(() => {
-    const active = inScope.filter((p) => p.stage !== "merged" && p.stage !== "draft");
+    const active = inScope.filter((p) => p.stage !== "draft");
     const onUs = active.filter((p) => p.onUs);
     return {
       onUs: onUs.length,
@@ -227,7 +217,7 @@ export function App() {
     if (stage) {
       return [{ key: stage, title: STAGE_LABELS[stage], hint: STAGE_HINTS[stage], tone: stage === "approved_conflict" ? "danger" : undefined, prs: byStage.get(stage) ?? [] }];
     }
-    const active = filtered.filter((p) => p.stage !== "merged" && p.stage !== "draft");
+    const active = filtered.filter((p) => p.stage !== "draft");
     return [
       {
         key: "approved_conflict",
@@ -377,7 +367,7 @@ export function App() {
         />
       </section>
 
-      <section className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-7 gap-2 mb-4" aria-label="Stages">
+      <section className="grid grid-cols-3 lg:grid-cols-6 gap-2 mb-4" aria-label="Stages">
         {STAGE_ORDER.map((s) => {
           const n = byStage.get(s)?.length ?? 0;
           const selected = stage === s;

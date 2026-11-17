@@ -5,7 +5,7 @@
 import { isBot } from "./bots";
 import { RESERVED_GROUP } from "./constants";
 import type { PrDeskConfig } from "./config";
-import type { RawMergedPr, RawPr, RawPrEvent } from "./snapshot";
+import type { RawPr, RawPrEvent } from "./snapshot";
 
 export const COMMUNITY = RESERVED_GROUP;
 
@@ -16,8 +16,7 @@ export type Stage =
   | "approved"
   | "approved_conflict"
   | "conflict"
-  | "draft"
-  | "merged";
+  | "draft";
 
 // Whose move it is. "team" = an approved PR with conflicts that maintainers
 // may fix themselves (the author allowed edits from maintainers).
@@ -67,8 +66,6 @@ export type DerivedPr = {
   };
   conflictSince: string | null;
   conflictResolvedAt: string | null;
-  mergedAt?: string;
-  mergedBy?: string | null;
   timeline: RawPrEvent[];
 };
 
@@ -79,7 +76,6 @@ export const STAGE_ORDER: Stage[] = [
   "approved",
   "approved_conflict",
   "conflict",
-  "merged",
 ];
 
 export const STAGE_LABELS: Record<Stage, string> = {
@@ -90,7 +86,6 @@ export const STAGE_LABELS: Record<Stage, string> = {
   approved_conflict: "Approved · conflicts",
   conflict: "Conflicts",
   draft: "Draft",
-  merged: "Merged",
 };
 
 export const STAGE_HINTS: Record<Stage, string> = {
@@ -101,7 +96,6 @@ export const STAGE_HINTS: Record<Stage, string> = {
   approved_conflict: "Approved, but conflicts with the base branch",
   conflict: "Conflicts with the base branch and not approved yet",
   draft: "Draft pull request",
-  merged: "Merged recently",
 };
 
 export const MERGE_HEADLINE = /^Merge (branch|remote-tracking branch|pull request|.+ into )/i;
@@ -357,44 +351,5 @@ export function derivePr(pr: RawPr, ctx: DeriveContext): DerivedPr {
     conflictSince: pr.conflictSince,
     conflictResolvedAt: pr.conflictResolvedAt,
     timeline,
-  };
-}
-
-export function deriveMerged(pr: RawMergedPr, ctx: DeriveContext): DerivedPr {
-  const { group, source } = classifyAuthor(pr.author, ctx.config);
-  return {
-    id: `${pr.repo}#${pr.number}`,
-    repo: pr.repo,
-    number: pr.number,
-    title: pr.title,
-    url: pr.url,
-    author: pr.author,
-    group,
-    groupSource: source,
-    createdAt: pr.createdAt,
-    stage: "merged",
-    turn: "none",
-    onUs: false,
-    since: pr.mergedAt,
-    waitingDays: Math.max(0, (ctx.now - Date.parse(pr.mergedAt)) / DAY_MS),
-    waitingBusinessDays: null,
-    sla: null,
-    slaDays: null,
-    additions: 0,
-    deletions: 0,
-    ciState: null,
-    labels: [],
-    requestedReviewers: [],
-    approvers: [],
-    reviewers: [],
-    approvedAt: null,
-    maintainerCanModify: false,
-    mergeableUnknown: false,
-    badges: { rebased: false, wasApproved: false, pushedAfterApproval: false, changesRequested: false, conflictResolved: false },
-    conflictSince: null,
-    conflictResolvedAt: null,
-    mergedAt: pr.mergedAt,
-    mergedBy: pr.mergedBy,
-    timeline: [],
   };
 }

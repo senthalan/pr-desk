@@ -137,3 +137,52 @@ export function computeTrends(
 
   return { totalMerged: total, firstMergedAt, byGroup, months: monthRows };
 }
+
+export type MonthPr = {
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  group: string;
+  createdAt: number; // Unix seconds
+  mergedAt: number;
+  mergedBy: string | null;
+  firstResponseH: number | null;
+  timeToMergeH: number;
+};
+
+// Merged PRs for one calendar month (in the business timezone), newest first.
+// `group` is a group key, "community", or "all".
+export function mergedInMonth(
+  history: HistoryFile,
+  config: PrDeskConfig,
+  month: string,
+  group: string,
+  repo: string | null = null,
+): MonthPr[] {
+  const out: MonthPr[] = [];
+  for (const [r, h] of Object.entries(history.repos)) {
+    if (repo && r !== repo) continue;
+    for (const [number, title, author, created, mergedAt, mergedBy, firstAt] of h.rows) {
+      if (isBot(author, config.bots)) continue;
+      if (monthKey(mergedAt, config.businessDays.timezone) !== month) continue;
+      const g = classifyAuthor(author, config).group;
+      if (group !== "all" && g !== group) continue;
+      out.push({
+        repo: r,
+        number,
+        title,
+        url: `https://github.com/${r}/pull/${number}`,
+        author,
+        group: g,
+        createdAt: created,
+        mergedAt,
+        mergedBy,
+        firstResponseH: firstAt != null ? Math.max(0, firstAt - created) / 3600 : null,
+        timeToMergeH: Math.max(0, mergedAt - created) / 3600,
+      });
+    }
+  }
+  return out.sort((a, b) => b.mergedAt - a.mergedAt);
+}

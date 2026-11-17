@@ -21,7 +21,6 @@ export const STAGE_TONE: Record<Stage, Tone> = {
   approved_conflict: "danger",
   conflict: "warn",
   draft: "neutral",
-  merged: "neutral",
 };
 
 export const TURN_LABELS: Record<Turn, string> = {
@@ -71,9 +70,6 @@ export function formatHours(h: number | null): string {
 }
 
 export function WaitChip({ pr }: { pr: DerivedPr }) {
-  if (pr.stage === "merged") {
-    return <span className="text-xs text-muted whitespace-nowrap">{formatSpan(pr.waitingDays)} ago</span>;
-  }
   if (pr.sla) {
     const tone: Tone = pr.sla === "breach" ? "danger" : pr.sla === "warn" ? "warn" : "ok";
     return (
