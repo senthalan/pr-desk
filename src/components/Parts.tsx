@@ -128,6 +128,28 @@ export function AvatarStack({ logins, max = 4 }: { logins: string[]; max?: numbe
   );
 }
 
+// Who has responded: people who submitted a review, then (labelled) people
+// who only commented. "none" only when nobody but the author has responded.
+export function ReviewActivity({ pr, max = 4 }: { pr: DerivedPr; max?: number }) {
+  if (pr.reviewers.length === 0 && pr.commenters.length === 0) {
+    return <span className="text-xs text-muted">none</span>;
+  }
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      {pr.reviewers.length > 0 && <AvatarStack logins={pr.reviewers} max={max} />}
+      {pr.commenters.length > 0 && (
+        <span
+          className="inline-flex items-center gap-1.5"
+          title={`Commented without a review: ${pr.commenters.map((l) => `@${l}`).join(", ")}`}
+        >
+          <AvatarStack logins={pr.commenters} max={max} />
+          <span className="text-[11px] text-muted">commented</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 // Everyone on the review side, including pending requests. Used by the
 // Reviewer filter so "my queue" also finds PRs I've been asked to review;
 // the Reviewers column shows only `pr.reviewers`.

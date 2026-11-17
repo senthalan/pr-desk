@@ -54,6 +54,9 @@ export type DerivedPr = {
   approvers: string[];
   // Submitted a review — not just commented, not just requested.
   reviewers: string[];
+  // Commented on the conversation without submitting a review (not the
+  // author, not bots, not anyone already in `reviewers`).
+  commenters: string[];
   approvedAt: string | null;
   maintainerCanModify: boolean;
   mergeableUnknown: boolean;
@@ -312,6 +315,13 @@ export function derivePr(pr: RawPr, ctx: DeriveContext): DerivedPr {
   const waitingDays = sinceMs != null ? Math.max(0, (ctx.now - sinceMs) / DAY_MS) : null;
   const waitingBusinessDays = sinceMs != null ? businessDaysBetween(sinceMs, ctx.now, config.businessDays) : null;
   const { group, source } = classifyAuthor(pr.author, config);
+  const reviewers = Array.from(
+    new Set([
+      ...approvals.map((r) => r.author),
+      ...latest.map((r) => r.author),
+      ...reviewerActs.filter((e) => e.kind === "review").map((e) => e.actor),
+    ]),
+  );
 
   return {
     id: `${pr.repo}#${pr.number}`,
@@ -337,12 +347,9 @@ export function derivePr(pr: RawPr, ctx: DeriveContext): DerivedPr {
     labels: pr.labels,
     requestedReviewers: pr.requestedReviewers,
     approvers: approvals.map((r) => r.author),
-    reviewers: Array.from(
-      new Set([
-        ...approvals.map((r) => r.author),
-        ...latest.map((r) => r.author),
-        ...reviewerActs.filter((e) => e.kind === "review").map((e) => e.actor),
-      ]),
+    reviewers,
+    commenters: Array.from(
+      new Set(reviewerActs.filter((e) => e.kind === "comment" && !reviewers.includes(e.actor)).map((e) => e.actor)),
     ),
     approvedAt,
     maintainerCanModify: pr.maintainerCanModify,

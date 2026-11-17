@@ -1,5 +1,5 @@
 import { STAGE_HINTS, STAGE_LABELS, type DerivedPr, type Stage } from "../lib/derive";
-import { Avatar, AvatarStack, PrBadges, STAGE_TONE, TONE_CLASSES, TURN_LABELS, WaitChip } from "./Parts";
+import { Avatar, PrBadges, ReviewActivity, STAGE_TONE, TONE_CLASSES, TURN_LABELS, WaitChip } from "./Parts";
 
 export function Board({
   columns,
@@ -42,12 +42,12 @@ export function Board({
                     <Avatar login={pr.author} size={16} />
                     <span className="font-mono truncate">{showRepo ? pr.repo.split("/")[1] : ""}#{pr.number} · @{pr.author}</span>
                   </div>
-                  <div className="mt-2 flex items-center justify-between gap-2">
+                  <div className="mt-2 flex items-start justify-between gap-2">
                     <span className="flex items-center gap-1.5 text-xs">
                       <WaitChip pr={pr} />
                       <span className={pr.onUs ? "text-fg" : "text-muted"}>{TURN_LABELS[pr.turn]}</span>
                     </span>
-                    <AvatarStack logins={pr.reviewers} max={3} />
+                    <ReviewActivity pr={pr} max={3} />
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-1 empty:hidden">
                     <PrBadges pr={pr} />

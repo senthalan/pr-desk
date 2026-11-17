@@ -1,7 +1,7 @@
 import type { DerivedPr } from "../lib/derive";
 import {
   Avatar,
-  AvatarStack,
+  ReviewActivity,
   PrBadges,
   StagePill,
   TONE_CLASSES,
@@ -65,7 +65,7 @@ export function Queue({
                   <th className="text-left font-normal px-3 py-2 w-40">Stage</th>
                   <th className="text-left font-normal px-3 py-2 w-28">Turn</th>
                   <th className="text-left font-normal px-3 py-2 w-20">Waiting</th>
-                  <th className="text-left font-normal px-3 py-2 w-28">Reviewers</th>
+                  <th className="text-left font-normal px-3 py-2 w-36" title="Submitted a review, then anyone who only commented">Reviewers</th>
                 </tr>
               </thead>
               <tbody>
@@ -101,7 +101,7 @@ export function Queue({
                       <WaitChip pr={pr} />
                     </td>
                     <td className="px-3 py-2.5">
-                      <AvatarStack logins={pr.reviewers} />
+                      <ReviewActivity pr={pr} />
                     </td>
                   </tr>
                 ))}

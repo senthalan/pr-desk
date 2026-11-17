@@ -103,6 +103,8 @@ export function Drawer({
               <dd><AvatarStack logins={pr.approvers} max={8} /></dd>
               <dt className="text-muted">Reviewed by</dt>
               <dd><AvatarStack logins={pr.reviewers} max={8} /></dd>
+              <dt className="text-muted">Commented</dt>
+              <dd><AvatarStack logins={pr.commenters} max={8} /></dd>
               <dt className="text-muted">Requested</dt>
               <dd><AvatarStack logins={pr.requestedReviewers} max={8} /></dd>
               <dt className="text-muted">Size</dt>
