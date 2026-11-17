@@ -14,7 +14,6 @@ import {
 
 const GROUP_SOURCE_LABEL = {
   member: "listed in config",
-  profile: "guessed from GitHub profile",
   default: "not in any group",
 } as const;
 

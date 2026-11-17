@@ -5,7 +5,7 @@
 import { isBot } from "./bots";
 import { RESERVED_GROUP } from "./constants";
 import type { PrDeskConfig } from "./config";
-import type { AuthorProfile, RawMergedPr, RawPr, RawPrEvent } from "./snapshot";
+import type { RawMergedPr, RawPr, RawPrEvent } from "./snapshot";
 
 export const COMMUNITY = RESERVED_GROUP;
 
@@ -25,7 +25,7 @@ export type Turn = "reviewer" | "maintainer" | "team" | "author" | "none";
 
 export type SlaState = "ok" | "warn" | "breach";
 
-export type GroupSource = "member" | "profile" | "default";
+export type GroupSource = "member" | "default";
 
 export type DerivedPr = {
   id: string; // "owner/name#number"
@@ -108,27 +108,12 @@ export const MERGE_HEADLINE = /^Merge (branch|remote-tracking branch|pull reques
 
 // ---- Groups ----
 
-export function classifyAuthor(
-  login: string,
-  config: PrDeskConfig,
-  profile: AuthorProfile | undefined,
-): { group: string; source: GroupSource } {
+// Groups come only from the config lists. Anyone not listed is community.
+export function classifyAuthor(login: string, config: PrDeskConfig): { group: string; source: GroupSource } {
   const l = login.toLowerCase();
   const has = (list: string[]) => list.some((m) => m.toLowerCase() === l);
   if (has(config.community.members)) return { group: COMMUNITY, source: "member" };
   for (const g of config.groups) if (has(g.members)) return { group: g.key, source: "member" };
-  if (profile) {
-    const company = (profile.company ?? "").toLowerCase().replace(/@/g, "");
-    const orgs = profile.orgs.map((o) => o.toLowerCase());
-    for (const g of config.groups) {
-      for (const term of g.match) {
-        const t = term.toLowerCase().trim();
-        if (t && (company.includes(t) || orgs.some((o) => o.includes(t)))) {
-          return { group: g.key, source: "profile" };
-        }
-      }
-    }
-  }
   return { group: COMMUNITY, source: "default" };
 }
 
@@ -220,7 +205,6 @@ function slaFor(days: number | null, limit: number | null): SlaState | null {
 export type DeriveContext = {
   now: number;
   config: PrDeskConfig;
-  profiles: Record<string, AuthorProfile>;
 };
 
 export function derivePr(pr: RawPr, ctx: DeriveContext): DerivedPr {
@@ -333,7 +317,7 @@ export function derivePr(pr: RawPr, ctx: DeriveContext): DerivedPr {
   const sinceMs = since ? Date.parse(since) : null;
   const waitingDays = sinceMs != null ? Math.max(0, (ctx.now - sinceMs) / DAY_MS) : null;
   const waitingBusinessDays = sinceMs != null ? businessDaysBetween(sinceMs, ctx.now, config.businessDays) : null;
-  const { group, source } = classifyAuthor(pr.author, config, ctx.profiles[authorL]);
+  const { group, source } = classifyAuthor(pr.author, config);
 
   return {
     id: `${pr.repo}#${pr.number}`,
@@ -377,7 +361,7 @@ export function derivePr(pr: RawPr, ctx: DeriveContext): DerivedPr {
 }
 
 export function deriveMerged(pr: RawMergedPr, ctx: DeriveContext): DerivedPr {
-  const { group, source } = classifyAuthor(pr.author, ctx.config, ctx.profiles[pr.author.toLowerCase()]);
+  const { group, source } = classifyAuthor(pr.author, ctx.config);
   return {
     id: `${pr.repo}#${pr.number}`,
     repo: pr.repo,
@@ -413,37 +397,4 @@ export function deriveMerged(pr: RawMergedPr, ctx: DeriveContext): DerivedPr {
     mergedBy: pr.mergedBy,
     timeline: [],
   };
-}
-
-// ---- Time to first response (merged PRs in the history window) ----
-
-export type ResponseStats = { count: number; medianHours: number | null; p90Hours: number | null; noResponse: number };
-
-function quantile(sorted: number[], q: number): number | null {
-  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))] : null;
-}
-
-export function firstResponseStats(
-  merged: RawMergedPr[],
-  ctx: DeriveContext,
-  groupOf: (pr: RawMergedPr) => string,
-): Record<string, ResponseStats> {
-  const cutoff = new Date(ctx.now - ctx.config.historyDays * DAY_MS).toISOString();
-  const hours: Record<string, number[]> = {};
-  const none: Record<string, number> = {};
-  for (const pr of merged) {
-    if (pr.mergedAt < cutoff) continue;
-    for (const k of ["all", groupOf(pr)]) {
-      hours[k] ??= [];
-      none[k] ??= 0;
-      if (pr.firstResponseAt) hours[k].push(Math.max(0, Date.parse(pr.firstResponseAt) - Date.parse(pr.createdAt)) / 3_600_000);
-      else none[k]++;
-    }
-  }
-  const out: Record<string, ResponseStats> = {};
-  for (const k of Object.keys(hours)) {
-    const s = hours[k].sort((a, b) => a - b);
-    out[k] = { count: s.length + none[k], medianHours: quantile(s, 0.5), p90Hours: quantile(s, 0.9), noResponse: none[k] };
-  }
-  return out;
 }

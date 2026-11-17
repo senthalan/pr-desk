@@ -4,24 +4,25 @@ import {
   STAGE_HINTS,
   STAGE_LABELS,
   STAGE_ORDER,
-  classifyAuthor,
   deriveMerged,
   derivePr,
-  firstResponseStats,
   groupLabel,
   type DerivedPr,
   type Stage,
 } from "./lib/derive";
-import { SNAPSHOT_VERSION, type Snapshot } from "./lib/snapshot";
+import { HISTORY_VERSION, SNAPSHOT_VERSION, type HistoryFile, type Snapshot } from "./lib/snapshot";
+import { computeTrends } from "./lib/trends";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Queue, type QueueSection } from "./components/Queue";
 import { Board } from "./components/Board";
 import { Drawer } from "./components/Drawer";
+import { Trends } from "./components/Trends";
 import { STAGE_TONE, TONE_CLASSES, formatHours, formatRelative, formatSpan, reviewSide } from "./components/Parts";
 
-type View = "queue" | "board";
+type View = "queue" | "board" | "trends";
 const ALL = "all";
 const DATA_URL = `${import.meta.env.BASE_URL}data/pr-board.json`;
+const HISTORY_URL = `${import.meta.env.BASE_URL}data/history.json`;
 // Pages caches for ~10 minutes; re-reading more often buys nothing.
 const RELOAD_MS = 5 * 60_000;
 // Past this, the scheduled sync has probably stopped (GitHub pauses
@@ -72,7 +73,12 @@ export function App() {
     const s = q0.get("stage");
     return s && (STAGE_ORDER as string[]).includes(s) ? (s as Stage) : null;
   });
-  const [view, setView] = useState<View>(() => (readPref("prdesk.view") === "board" ? "board" : "queue"));
+  const [view, setView] = useState<View>(() => {
+    const v = readQuery().get("view") ?? readPref("prdesk.view");
+    return v === "board" || v === "trends" ? v : "queue";
+  });
+  const [history, setHistory] = useState<HistoryFile | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [showDrafts, setShowDrafts] = useState(false);
   const [reviewer, setReviewer] = useState(q0.get("reviewer") ?? readPref("prdesk.reviewer") ?? "");
   const [search, setSearch] = useState("");
@@ -88,6 +94,18 @@ export function App() {
       setLoadError(null);
     } catch (e: any) {
       setLoadError(e?.message ?? String(e));
+    }
+    // The full merged history is a separate, larger file; it only feeds the
+    // Trends view and one tile, so it never delays the queue.
+    try {
+      const r = await fetch(HISTORY_URL, { cache: "no-cache" });
+      if (!r.ok) throw new Error(r.status === 404 ? "no history yet — it's written by the next sync" : `HTTP ${r.status}`);
+      const h = (await r.json()) as HistoryFile;
+      if (h.version !== HISTORY_VERSION) throw new Error("history was written by a different version of pr-desk");
+      setHistory(h);
+      setHistoryError(null);
+    } catch (e: any) {
+      setHistoryError(e?.message ?? String(e));
     }
   }, []);
 
@@ -118,21 +136,27 @@ export function App() {
     set("stage", stage);
     set("repo", repo || null);
     set("reviewer", reviewer || null);
+    set("view", view === "queue" ? null : view);
     const qs = q.toString();
     window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-  }, [config, activeGroup, stage, repo, reviewer]);
+  }, [config, activeGroup, stage, repo, reviewer, view]);
 
   const derived = useMemo(() => {
-    if (!snap) return { prs: [] as DerivedPr[], stats: {} as ReturnType<typeof firstResponseStats> };
-    const ctx = { now, config: snap.config, profiles: snap.profiles };
+    if (!snap) return [] as DerivedPr[];
+    const ctx = { now, config: snap.config };
     const mergedCutoff = new Date(now - snap.config.recentMergedDays * 86_400_000).toISOString();
     const prs = [
       ...snap.open.map((p) => derivePr(p, ctx)),
       ...snap.merged.filter((m) => m.mergedAt >= mergedCutoff).map((m) => deriveMerged(m, ctx)),
     ];
-    const stats = firstResponseStats(snap.merged, ctx, (m) => classifyAuthor(m.author, snap.config, snap.profiles[m.author.toLowerCase()]).group);
-    return { prs, stats };
+    return prs;
   }, [snap, now]);
+
+  // Recent first-response figures for the tile, from the full history.
+  const recent = useMemo(
+    () => (history && snap ? computeTrends(history, snap.config, now, "90d", repo || null) : null),
+    [history, snap, now, repo],
+  );
 
   const labelOf = useCallback((key: string) => (config ? groupLabel(config, key) : key), [config]);
   const tabs = useMemo(
@@ -142,8 +166,8 @@ export function App() {
   const multiRepo = (config?.repos.length ?? 0) > 1;
 
   const inScope = useMemo(
-    () => derived.prs.filter((p) => (activeGroup === ALL || p.group === activeGroup) && (!repo || p.repo === repo)),
-    [derived.prs, activeGroup, repo],
+    () => derived.filter((p) => (activeGroup === ALL || p.group === activeGroup) && (!repo || p.repo === repo)),
+    [derived, activeGroup, repo],
   );
 
   const reviewerOptions = useMemo(() => {
@@ -179,13 +203,13 @@ export function App() {
 
   const tabCounts = useMemo(() => {
     const c: Record<string, number> = { [ALL]: 0 };
-    for (const p of derived.prs) {
+    for (const p of derived) {
       if (p.stage === "merged" || p.stage === "draft" || (repo && p.repo !== repo)) continue;
       c[ALL]++;
       c[p.group] = (c[p.group] ?? 0) + 1;
     }
     return c;
-  }, [derived.prs, repo]);
+  }, [derived, repo]);
 
   const kpis = useMemo(() => {
     const active = inScope.filter((p) => p.stage !== "merged" && p.stage !== "draft");
@@ -228,8 +252,8 @@ export function App() {
     ];
   }, [stage, filtered, byStage, showDrafts]);
 
-  const openPr = openId ? derived.prs.find((p) => p.id === openId) ?? null : null;
-  const stats = derived.stats[activeGroup === ALL ? "all" : activeGroup];
+  const openPr = openId ? derived.find((p) => p.id === openId) ?? null : null;
+  const stats = recent?.byGroup[activeGroup === ALL ? "all" : activeGroup];
   const configUrl = snap?.host ? `https://github.com/${snap.host}/edit/main/pr-desk.config.json` : null;
   const stale = snap ? now - Date.parse(snap.generatedAt) > STALE_MS : false;
 
@@ -291,21 +315,40 @@ export function App() {
             {t.label} <span className="text-muted font-normal">{tabCounts[t.key] ?? 0}</span>
           </button>
         ))}
-        {multiRepo && (
-          <select
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            aria-label="Repository"
-            className="ml-auto px-2 py-1.5 rounded border border-border bg-panel text-sm"
-          >
-            <option value="">All repositories</option>
-            {snap.config.repos.map((r) => (
-              <option key={r} value={r}>{r}</option>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {multiRepo && (
+            <select
+              value={repo}
+              onChange={(e) => setRepo(e.target.value)}
+              aria-label="Repository"
+              className="px-2 py-1.5 rounded border border-border bg-panel text-sm"
+            >
+              <option value="">All repositories</option>
+              {snap.config.repos.map((r) => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          )}
+          <div className="inline-flex rounded border border-border overflow-hidden" role="group" aria-label="View">
+            {(["queue", "board", "trends"] as View[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => {
+                  setView(v);
+                  writePref("prdesk.view", v);
+                }}
+                aria-pressed={view === v}
+                className={`px-3 py-1.5 text-sm ${view === v ? "bg-panel text-fg" : "text-muted hover:text-fg"}`}
+              >
+                {v === "queue" ? "Queue" : v === "board" ? "Board" : "Trends"}
+              </button>
             ))}
-          </select>
-        )}
+          </div>
+        </div>
       </nav>
 
+      {view !== "trends" && (
+      <>
       <section className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
         <Kpi label="Waiting on us" value={String(kpis.onUs)} />
         <Kpi
@@ -323,10 +366,14 @@ export function App() {
         />
         <Kpi label="Longest wait on us" value={formatSpan(kpis.oldest)} sub="business days" />
         <Kpi
-          label={`First response · ${snap.config.historyDays}d`}
-          value={stats?.p90Hours != null ? `p90 ${formatHours(stats.p90Hours)}` : "—"}
-          sub={stats ? `median ${formatHours(stats.medianHours)} · ${stats.count} merged PRs` : "no merged PRs"}
-          hint="Time from opening to the first review or comment by someone other than the author, for PRs merged in this window"
+          label="First response · 90d"
+          value={stats?.p90FirstResponseH != null ? `p90 ${formatHours(stats.p90FirstResponseH)}` : "—"}
+          sub={stats ? `median ${formatHours(stats.medianFirstResponseH)} · ${stats.merged} merged PRs` : history ? "no merged PRs" : "loading…"}
+          hint="Time from opening to the first review or comment by someone other than the author, for PRs merged in the last 90 days. See Trends for more."
+          onClick={() => {
+            setView("trends");
+            writePref("prdesk.view", "trends");
+          }}
         />
       </section>
 
@@ -385,24 +432,13 @@ export function App() {
             Clear stage filter
           </button>
         )}
-        <div className="ml-auto inline-flex rounded border border-border overflow-hidden" role="group" aria-label="View">
-          {(["queue", "board"] as View[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => {
-                setView(v);
-                writePref("prdesk.view", v);
-              }}
-              aria-pressed={view === v}
-              className={`px-3 py-1.5 text-sm ${view === v ? "bg-panel text-fg" : "text-muted hover:text-fg"}`}
-            >
-              {v === "queue" ? "Queue" : "Board"}
-            </button>
-          ))}
-        </div>
       </section>
+      </>
+      )}
 
-      {view === "queue" ? (
+      {view === "trends" ? (
+        <Trends history={history} error={historyError} config={snap.config} group={activeGroup} repo={repo || null} now={now} />
+      ) : view === "queue" ? (
         <Queue sections={sections} groupLabel={labelOf} showGroup={activeGroup === ALL} showRepo={multiRepo} onOpen={(p) => setOpenId(p.id)} />
       ) : (
         <Board
@@ -417,8 +453,8 @@ export function App() {
 
       <footer className="mt-10 pt-4 border-t border-border text-xs text-muted flex flex-wrap gap-x-4 gap-y-1">
         <span>
-          Waiting times are in business days ({snap.config.businessDays.timezone}). Groups come from the config, then GitHub
-          profiles.
+          Waiting times are in business days ({snap.config.businessDays.timezone}). Groups come from the member lists in the
+          config.
         </span>
         {configUrl && (
           <a href={configUrl} target="_blank" rel="noreferrer" className="underline hover:text-fg">

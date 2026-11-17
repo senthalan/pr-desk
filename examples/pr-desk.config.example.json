@@ -13,16 +13,12 @@
       "members": [
         "alice",
         "bob"
-      ],
-      "match": []
+      ]
     },
     {
       "key": "partner",
       "label": "Partner Co",
-      "members": [],
-      "match": [
-        "partnerco"
-      ]
+      "members": []
     }
   ],
   "community": {
@@ -43,7 +39,6 @@
     ]
   },
   "recentMergedDays": 14,
-  "historyDays": 30,
   "bots": [
     "acme-release-bot"
   ]

@@ -3,7 +3,7 @@
 
 import type { PrDeskConfig } from "./config";
 
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 export type RawPrEvent =
   | { kind: "commit"; at: string; merge: boolean }
@@ -51,8 +51,6 @@ export type RawMergedPr = {
   firstResponseAt: string | null;
 };
 
-export type AuthorProfile = { company: string | null; orgs: string[] };
-
 export type Snapshot = {
   version: typeof SNAPSHOT_VERSION;
   generatedAt: string;
@@ -62,8 +60,33 @@ export type Snapshot = {
   config: PrDeskConfig;
   open: RawPr[];
   merged: RawMergedPr[];
-  // Keyed by lowercased login.
-  profiles: Record<string, AuthorProfile>;
+};
+
+// public/data/history.json — every merged PR, kept compact. Backfilled once
+// (resumable across runs), then extended with new merges each sync. Loaded by
+// the page separately from pr-board.json, for the Trends view.
+//
+// Row: [number, title, author, createdAt, mergedAt, mergedBy, firstResponseAt]
+// with times as Unix seconds (firstResponseAt null when nobody but the author
+// and bots ever responded).
+export type HistoryRow = [number, string, string, number, number, string | null, number | null];
+
+export type RepoHistory = {
+  // Start time of the last sync that walked recent merges; the next sync
+  // only fetches PRs updated after this.
+  syncedAt: string;
+  // Cursor for the one-time backfill (oldest first). null once complete.
+  backfillCursor: string | null;
+  backfilled: boolean;
+  rows: HistoryRow[];
+};
+
+export const HISTORY_VERSION = 1;
+
+export type HistoryFile = {
+  version: typeof HISTORY_VERSION;
+  generatedAt: string;
+  repos: Record<string, RepoHistory>;
 };
 
 // Carried between syncs in public/data/state.json (CI restores it from the

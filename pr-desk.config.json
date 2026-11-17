@@ -49,9 +49,6 @@
         "Sadeesha-Sath",
         "Thisara-Welmilla",
         "samadhisakunika"
-      ],
-      "match": [
-        "wso2"
       ]
     }
   ],
@@ -73,6 +70,7 @@
     ]
   },
   "recentMergedDays": 14,
-  "historyDays": 30,
-  "bots": []
+  "bots": [
+    "thunder-automation-bot"
+  ]
 }

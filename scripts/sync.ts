@@ -1,12 +1,14 @@
-// Fetches PR state for every repo in pr-desk.config.json and writes
-// public/data/pr-board.json (what the page reads) and public/data/state.json
-// (carried to the next run so conflict start/resolve times can be tracked).
+// Fetches PR state for every repo in pr-desk.config.json and writes, under
+// public/data/:
+//   pr-board.json  what the page reads: open PRs, recent merges, config
+//   history.json   every merged PR, compact (Trends view); extended each run
+//   state.json     conflict tracking carried to the next run
 //
 //   GITHUB_TOKEN=$(gh auth token) npm run sync
 //
-// Cost: roughly 1 + open/10 + merged/50 GraphQL calls per repo (~40 for a repo
-// with 200 open PRs), plus one REST call per unlisted author for public org
-// memberships, cached for a week.
+// Cost per repo: ~1 + open/10 GraphQL calls for open PRs (~22 for 200 open),
+// usually 1 for new merges, plus a one-time backfill of merged history
+// (merged/50 calls).
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -15,9 +17,12 @@ import { isBot } from "../src/lib/bots";
 import { MERGE_HEADLINE } from "../src/lib/derive";
 import {
   SNAPSHOT_VERSION,
-  type AuthorProfile,
+  HISTORY_VERSION,
+  type HistoryFile,
+  type HistoryRow,
   type RawMergedPr,
   type RawPr,
+  type RepoHistory,
   type RawPrEvent,
   type Snapshot,
   type SyncState,
@@ -28,10 +33,10 @@ const CONFIG_FILE = process.env.PR_DESK_CONFIG ?? "pr-desk.config.json";
 const OUT_DIR = path.join("public", "data");
 const BOARD_FILE = path.join(OUT_DIR, "pr-board.json");
 const STATE_FILE = path.join(OUT_DIR, "state.json");
+const HISTORY_FILE = path.join(OUT_DIR, "history.json");
 
 const CONCURRENCY = 4;
 const DETAIL_BATCH = 10;
-const PROFILE_TTL_DAYS = 7;
 const DAY_MS = 86_400_000;
 
 const PR_FIELDS = `
@@ -193,118 +198,109 @@ async function fetchOpen(gql: Gql, repo: string, bots: string[]): Promise<RawPr[
   return prs;
 }
 
-// Walk merged PRs by most recent update and stop once a page is entirely
-// older than the window (mergedAt <= updatedAt, so nothing recent is skipped).
-// Search is avoided: it's several times slower here.
-async function fetchMerged(gql: Gql, repo: string, days: number, bots: string[]): Promise<RawMergedPr[]> {
+const MERGED_FIELDS = `
+  number title createdAt updatedAt mergedAt
+  author { login }
+  mergedBy { login }
+  reviews(first: 10) { nodes { submittedAt author { login } } }
+  comments(first: 10) { nodes { createdAt author { login } } }
+`;
+
+const toSec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+
+function mergedRow(n: any, bots: string[]): HistoryRow | null {
+  const author = n?.author?.login;
+  if (!n?.mergedAt || !author || isBot(author, bots)) return null;
+  const a = author.toLowerCase();
+  // First review or comment by someone other than the author or a bot.
+  const first = [
+    ...(n.reviews?.nodes ?? []).filter((r: any) => r.submittedAt).map((r: any) => ({ at: r.submittedAt, who: r.author?.login })),
+    ...(n.comments?.nodes ?? []).map((c: any) => ({ at: c.createdAt, who: c.author?.login })),
+  ]
+    .filter((x: any) => x.who && x.who.toLowerCase() !== a && !isBot(x.who, bots))
+    .map((x: any) => x.at as string)
+    .sort()[0];
+  return [n.number, n.title, author, toSec(n.createdAt), toSec(n.mergedAt), n.mergedBy?.login ?? null, first ? toSec(first) : null];
+}
+
+// Max pages of backfill per run (50 PRs each). A repo with more history than
+// this finishes over several runs; the cursor is saved in history.json.
+const BACKFILL_PAGES_PER_RUN = 120;
+
+// Merged-PR history, in two walks that both upsert by PR number:
+//  - recent: newest updates first, stopping at the previous sync (minus a
+//    margin). Cheap — usually one page. Catches every new merge.
+//  - backfill: oldest first, once, resumable. Fills in everything before the
+//    first sync. A PR merged mid-backfill can land before the saved cursor,
+//    but it was just updated, so the recent walk catches it.
+async function updateHistory(
+  gql: Gql,
+  repo: string,
+  prev: RepoHistory | undefined,
+  recentMergedDays: number,
+  bots: string[],
+): Promise<RepoHistory> {
   const { owner, name } = splitRepo(repo);
-  const since = new Date(Date.now() - days * DAY_MS).toISOString();
-  const q = `query($owner: String!, $name: String!, $cursor: String) { ${RATE}
-    repository(owner: $owner, name: $name) {
-      pullRequests(states: MERGED, first: 50, after: $cursor, orderBy: {field: UPDATED_AT, direction: DESC}) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          number title url createdAt updatedAt mergedAt
-          author { login }
-          mergedBy { login }
-          reviews(first: 10) { nodes { submittedAt author { login } } }
-          comments(first: 10) { nodes { createdAt author { login } } }
+  const startedAt = new Date().toISOString();
+  const rows = new Map<number, HistoryRow>((prev?.rows ?? []).map((r) => [r[0], r]));
+  const page = async (order: "UPDATED_AT DESC" | "CREATED_AT ASC", cursor: string | null, label: string) => {
+    const [field, direction] = order.split(" ");
+    const q = `query($owner: String!, $name: String!, $cursor: String) { ${RATE}
+      repository(owner: $owner, name: $name) {
+        pullRequests(states: MERGED, first: 50, after: $cursor, orderBy: {field: ${field}, direction: ${direction}}) {
+          pageInfo { hasNextPage endCursor }
+          nodes { ${MERGED_FIELDS} }
         }
-      }
-    } }`;
-  const out: RawMergedPr[] = [];
-  let cursor: string | null = null;
-  for (let p = 0; p < 60; p++) {
-    const res: any = await runQuery(gql, `${repo} merged p${p}`, q, { owner, name, cursor });
-    const page = res?.repository?.pullRequests;
-    if (!page) break;
-    let oldestUpdated: string | null = null;
-    for (const n of page.nodes ?? []) {
-      oldestUpdated = n?.updatedAt ?? oldestUpdated;
-      const author = n?.author?.login;
-      if (!n?.mergedAt || n.mergedAt < since || !author || isBot(author, bots)) continue;
-      const a = author.toLowerCase();
-      const responses: string[] = [
-        ...(n.reviews?.nodes ?? []).filter((r: any) => r.submittedAt).map((r: any) => ({ at: r.submittedAt, who: r.author?.login })),
-        ...(n.comments?.nodes ?? []).map((c: any) => ({ at: c.createdAt, who: c.author?.login })),
-      ]
-        .filter((x: any) => x.who && x.who.toLowerCase() !== a && !isBot(x.who, bots))
-        .map((x: any) => x.at)
-        .sort();
-      out.push({
-        repo,
-        number: n.number,
-        title: n.title,
-        url: n.url,
-        author,
-        createdAt: n.createdAt,
-        mergedAt: n.mergedAt,
-        mergedBy: n.mergedBy?.login ?? null,
-        firstResponseAt: responses[0] ?? null,
-      });
+      } }`;
+    const res: any = await runQuery(gql, `${repo} ${label}`, q, { owner, name, cursor });
+    const pr = res?.repository?.pullRequests;
+    for (const n of pr?.nodes ?? []) {
+      const row = mergedRow(n, bots);
+      if (row) rows.set(row[0], row);
     }
-    if (!page.pageInfo?.hasNextPage || (oldestUpdated && oldestUpdated < since)) break;
-    cursor = page.pageInfo.endCursor;
+    return { nodes: (pr?.nodes ?? []) as any[], next: pr?.pageInfo?.hasNextPage ? (pr.pageInfo.endCursor as string) : null };
+  };
+
+  // Recent walk. mergedAt <= updatedAt, so stopping on updatedAt can't skip a
+  // recent merge. Six hours of overlap absorbs clock skew and late indexing.
+  const since = prev?.syncedAt
+    ? new Date(Date.parse(prev.syncedAt) - 6 * 3_600_000).toISOString()
+    : new Date(Date.now() - recentMergedDays * DAY_MS).toISOString();
+  let cursor: string | null = null;
+  let recentPages = 0;
+  for (; recentPages < 200; recentPages++) {
+    const { nodes, next } = await page("UPDATED_AT DESC", cursor, `merged recent p${recentPages}`);
+    const oldest = nodes.at(-1)?.updatedAt;
+    if (!next || (oldest && oldest < since)) break;
+    cursor = next;
   }
-  return out;
-}
 
-type StoredProfile = AuthorProfile & { at: string };
-const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
-
-// Public org memberships only. The GraphQL `user.organizations` field also
-// returns *private* memberships the token's owner can see, which would end up
-// on a public page and make results depend on whose token ran the sync. The
-// REST endpoint lists public memberships for every token.
-async function publicOrgs(login: string): Promise<string[]> {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  const res = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}/orgs?per_page=100`, {
-    headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
-  });
-  if (!res.ok) return [];
-  const body = (await res.json()) as { login: string }[];
-  return body.map((o) => o.login);
-}
-
-// Company + public org memberships, for groups' `match` terms. A hint only;
-// `members` lists always win.
-async function fetchProfiles(gql: Gql, logins: string[]): Promise<Record<string, StoredProfile>> {
-  const out: Record<string, StoredProfile> = {};
-  const now = new Date().toISOString();
-  const chunks: string[][] = [];
-  for (let i = 0; i < logins.length; i += 40) chunks.push(logins.slice(i, i + 40));
-
-  const companies: Record<string, string | null> = {};
-  await pool(
-    chunks.map((chunk) => async () => {
-      const vars: Record<string, string> = {};
-      const decls: string[] = [];
-      const fields: string[] = [];
-      chunk.forEach((login, j) => {
-        vars[`l${j}`] = login;
-        decls.push(`$l${j}: String!`);
-        fields.push(`u${j}: user(login: $l${j}) { company }`);
-      });
-      const q = `query(${decls.join(", ")}) { ${RATE} ${fields.join("\n")} }`;
-      let data: any;
-      try {
-        data = await runQuery(gql, `profiles ${chunk.length}`, q, vars);
-      } catch (e: any) {
-        // A renamed/deleted account fails its own alias only; @octokit/graphql
-        // throws with the partial result on `e.data`.
-        data = e?.data;
+  // Backfill, if not done yet.
+  let backfillCursor = prev ? prev.backfillCursor : null;
+  let backfilled = prev?.backfilled ?? false;
+  let backfillPages = 0;
+  if (!backfilled) {
+    for (; backfillPages < BACKFILL_PAGES_PER_RUN; backfillPages++) {
+      const { next } = await page("CREATED_AT ASC", backfillCursor, `merged backfill p${backfillPages}`);
+      backfillCursor = next;
+      if (!next) {
+        backfilled = true;
+        break;
       }
-      chunk.forEach((login, j) => (companies[login] = data?.[`u${j}`]?.company ?? null));
-    }),
-    CONCURRENCY,
+    }
+  }
+
+  console.log(
+    `${repo}: merged history ${rows.size} PRs (${recentPages + 1} recent page(s)` +
+      (backfillPages || !prev?.backfilled ? `, ${backfillPages + (backfilled && !prev?.backfilled ? 1 : 0)} backfill page(s)${backfilled ? ", complete" : ", continues next run"}` : "") +
+      ")",
   );
-  await pool(
-    logins.map((login) => async () => {
-      out[login.toLowerCase()] = { company: companies[login] ?? null, orgs: await publicOrgs(login).catch(() => []), at: now };
-    }),
-    CONCURRENCY,
-  );
-  return out;
+  return {
+    syncedAt: startedAt,
+    backfillCursor: backfilled ? null : backfillCursor,
+    backfilled,
+    rows: Array.from(rows.values()).sort((a, b) => a[4] - b[4]),
+  };
 }
 
 async function readJson<T>(file: string): Promise<T | null> {
@@ -355,38 +351,41 @@ async function main() {
 
   const stored = await readJson<SyncState>(STATE_FILE);
   const prevState: SyncState = stored?.version === 2 ? stored : { version: 2, prs: {} };
-  const prevBoard = await readJson<Snapshot>(BOARD_FILE);
+
+  const storedHistory = await readJson<HistoryFile>(HISTORY_FILE);
+  const prevHistory = storedHistory?.version === HISTORY_VERSION ? storedHistory.repos : {};
+  const history: HistoryFile = { version: HISTORY_VERSION, generatedAt: now, repos: {} };
 
   const open: RawPr[] = [];
-  const merged: RawMergedPr[] = [];
-  const window = Math.max(config.recentMergedDays, config.historyDays);
   for (const repo of config.repos) {
-    const [o, m] = await Promise.all([fetchOpen(gql, repo, config.bots), fetchMerged(gql, repo, window, config.bots)]);
-    console.log(`${repo}: ${o.length} open, ${m.length} merged in the last ${window} days`);
+    const [o, h] = await Promise.all([
+      fetchOpen(gql, repo, config.bots),
+      updateHistory(gql, repo, prevHistory[repo], config.recentMergedDays, config.bots),
+    ]);
+    console.log(`${repo}: ${o.length} open`);
     open.push(...o);
-    merged.push(...m);
+    history.repos[repo] = h;
   }
-  const state = applyState(open, prevState);
 
-  // Profiles are only needed when some group matches on them, and only for
-  // authors no list already places. Reuse recent lookups from the last run.
-  const profiles: Record<string, StoredProfile> = {};
-  if (config.groups.some((g) => g.match.length)) {
-    const pinned = new Set(
-      [...config.community.members, ...config.groups.flatMap((g) => g.members)].map((l) => l.toLowerCase()),
-    );
-    const prevProfiles = (prevBoard?.profiles ?? {}) as Record<string, StoredProfile>;
-    const fresh = Date.now() - PROFILE_TTL_DAYS * DAY_MS;
-    const wanted = new Set<string>();
-    for (const p of [...open, ...merged]) {
-      const l = p.author.toLowerCase();
-      if (pinned.has(l) || !LOGIN_RE.test(p.author)) continue;
-      const cached = prevProfiles[l];
-      if (cached?.at && Date.parse(cached.at) > fresh) profiles[l] = cached;
-      else wanted.add(p.author);
-    }
-    Object.assign(profiles, await fetchProfiles(gql, Array.from(wanted)));
-  }
+  // The board's Merged column comes from the history; the full history is a
+  // separate file the page loads on demand.
+  const recentCutoff = Date.now() / 1000 - config.recentMergedDays * 86_400;
+  const merged: RawMergedPr[] = Object.entries(history.repos).flatMap(([repo, h]) =>
+    h.rows
+      .filter((r) => r[4] >= recentCutoff)
+      .map(([number, title, author, created, mergedAt, mergedBy, first]) => ({
+        repo,
+        number,
+        title,
+        url: `https://github.com/${repo}/pull/${number}`,
+        author,
+        createdAt: new Date(created * 1000).toISOString(),
+        mergedAt: new Date(mergedAt * 1000).toISOString(),
+        mergedBy,
+        firstResponseAt: first != null ? new Date(first * 1000).toISOString() : null,
+      })),
+  );
+  const state = applyState(open, prevState);
 
   const snapshot: Snapshot = {
     version: SNAPSHOT_VERSION,
@@ -395,14 +394,14 @@ async function main() {
     config,
     open,
     merged,
-    profiles,
   };
   await writeJson(BOARD_FILE, snapshot);
   await writeJson(STATE_FILE, state);
+  await writeJson(HISTORY_FILE, history);
 
   const { calls, lastRemaining } = usage();
   console.log(
-    `Wrote ${BOARD_FILE}: ${open.length} open, ${merged.length} merged, ${Object.keys(profiles).length} profiles ` +
+    `Wrote ${BOARD_FILE}: ${open.length} open, ${merged.length} recently merged ` +
       `— ${calls} API calls in ${((Date.now() - t0) / 1000).toFixed(1)}s` +
       (lastRemaining != null ? `, ${lastRemaining} left this hour` : ""),
   );

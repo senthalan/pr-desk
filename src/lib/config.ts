@@ -18,12 +18,8 @@ const GroupSchema = z.object({
     .regex(/^[a-z0-9-]+$/, "use lowercase letters, digits and dashes")
     .refine((k) => k !== RESERVED_GROUP, `"${RESERVED_GROUP}" is reserved for everyone not in a group`),
   label: z.string().min(1),
-  // Explicit members. Always wins over a profile match.
+  // GitHub logins in this group. Anyone not listed in any group is community.
   members: z.array(LOGIN).default([]),
-  // Terms looked for (case-insensitive substring) in an author's GitHub
-  // profile company and public org memberships. A hint only — private
-  // memberships aren't visible, so prefer `members` for anyone you know.
-  match: z.array(z.string().min(2)).default([]),
 });
 
 export const ConfigSchema = z.object({
@@ -34,7 +30,7 @@ export const ConfigSchema = z.object({
   community: z
     .object({
       label: z.string().min(1).default("Community"),
-      // Pin these authors to community even if a group's `match` would claim them.
+      // Optional: listed here wins over a group listing.
       members: z.array(LOGIN).default([]),
     })
     .default({ label: "Community", members: [] }),
@@ -57,8 +53,6 @@ export const ConfigSchema = z.object({
     .default({ timezone: "UTC", weekendDays: [5, 6] }),
   // How long merged PRs stay on the board.
   recentMergedDays: z.number().int().min(1).max(60).default(14),
-  // Window for the "time to first response" statistic (merged PRs).
-  historyDays: z.number().int().min(7).max(90).default(30),
   // Extra logins to treat as bots, on top of the built-in list.
   bots: z.array(z.string()).default([]),
 });

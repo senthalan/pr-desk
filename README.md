@@ -28,8 +28,9 @@ since they're the cheapest work to finish.
 
 On top of that:
 
-- **Groups.** Authors are split into your groups (for example "Core team",
-  "Partner Co") and **Community** for everyone else. Community opens first.
+- **Groups.** Authors are split into the groups you list (for example "Core
+  team", "Partner Co") and **Community** for everyone else. Community opens
+  first.
 - **Waiting time** counts business days in your timezone, and turns amber at
   half the target and red past it.
 - **Badges:** rebased, conflict resolved, was approved, pushed after approval,
@@ -37,7 +38,10 @@ On top of that:
 - **Queue and Board views**, a reviewer filter ("my queue"), and a detail
   drawer with each PR's recent activity. Filters are kept in the URL, so
   `?reviewer=your-login` is a bookmarkable personal queue.
-- **Time to first response** for PRs merged in the last 30 days, per group.
+- **Trends** over your whole merged history: merged PRs per month, median
+  time to first response per month, and per-group figures (first response
+  median and p90, share answered within target, time to merge) for the last
+  90 days, 6 months, 12 months or all time.
 
 ## Set it up for your project
 
@@ -65,15 +69,14 @@ Your desk is then at `https://<owner>.github.io/<repo>/`.
   "description": "Open pull requests to Acme projects, by whose turn it is.",
   "repos": ["acme/widget", "acme/widget-docs"],
   "groups": [
-    { "key": "core", "label": "Core team", "members": ["alice", "bob"], "match": [] },
-    { "key": "partner", "label": "Partner Co", "members": [], "match": ["partnerco"] }
+    { "key": "core", "label": "Core team", "members": ["alice", "bob"] },
+    { "key": "partner", "label": "Partner Co", "members": ["carol"] }
   ],
   "community": { "label": "Community", "members": [] },
   "defaultView": "community",
   "targets": { "firstReviewDays": 2, "reReviewDays": 2, "mergeDays": 1 },
   "businessDays": { "timezone": "Europe/Berlin", "weekendDays": [5, 6] },
   "recentMergedDays": 14,
-  "historyDays": 30,
   "bots": ["acme-release-bot"]
 }
 ```
@@ -84,28 +87,19 @@ Your desk is then at `https://<owner>.github.io/<repo>/`.
 | `repos` | required | `owner/name` of each repository to track. |
 | `groups[]` | `[]` | Your groups. `key` is lowercase and can't be `community`. |
 | `groups[].members` | `[]` | GitHub logins in this group. |
-| `groups[].match` | `[]` | Terms looked for in an author's GitHub profile company and **public** org memberships. A hint for people you haven't listed. |
 | `community.label` | `"Community"` | Name of the everyone-else group. |
-| `community.members` | `[]` | Force these authors into Community even if a `match` term would claim them. |
+| `community.members` | `[]` | Optional: authors listed here count as Community even if a group also lists them. |
 | `defaultView` | `"community"` | Tab opened first: a group key, `community` or `all`. |
 | `targets` | `2 / 2 / 1` | Business days allowed for a first review, a re-review after an update, and merging an approved PR. |
 | `businessDays.timezone` | `"UTC"` | IANA timezone that defines your working days. |
 | `businessDays.weekendDays` | `[5, 6]` | Days off, **Monday-first**: `0` = Mon … `6` = Sun. |
-| `recentMergedDays` | `14` | How long merged PRs stay on the board. |
-| `historyDays` | `30` | Window for the time-to-first-response statistic. |
+| `recentMergedDays` | `14` | How long merged PRs stay on the board's Merged column. Trends always cover the full history. |
 | `bots` | `[]` | Extra logins to ignore, on top of the built-in list (Dependabot, Renovate, Copilot, CodeRabbit, …). |
 
-How an author's group is decided, first match wins:
-
-1. Listed in `community.members` → Community.
-2. Listed in a group's `members` → that group.
-3. A group's `match` term appears in their profile company or public orgs →
-   that group.
-4. Otherwise → Community.
-
-Profiles are often blank, and org memberships are usually private, so list
-the people you know in `members`. The drawer links straight to editing the
-config for anyone who isn't listed.
+An author's group comes only from these lists: listed in a group's `members`
+→ that group; otherwise → Community. Nothing is inferred from GitHub
+profiles. The PR drawer links straight to editing the config for anyone who
+isn't listed.
 
 Run `npm run check-config` to validate the file without calling GitHub; the
 workflow runs the same check before every sync.
@@ -122,7 +116,7 @@ the page is public unless your plan supports private Pages.
 
 ```
 schedule (every 20 min)
-  └─ npm run sync      scripts/sync.ts → public/data/pr-board.json + state.json
+  └─ npm run sync      scripts/sync.ts → public/data/pr-board.json, history.json, state.json
   └─ npm run build     Vite → dist/
   └─ deploy            GitHub Pages
 browser
@@ -130,13 +124,18 @@ browser
      so wait times stay current between syncs
 ```
 
-- **API cost:** about 1 + open/10 + merged/50 GraphQL calls per repo, plus a
-  few for author profiles. Around 40 calls for a repo with 200 open PRs, well
-  within the built-in token's hourly limit at a 20-minute schedule.
+- **API cost:** about 1 + open/10 GraphQL calls per repo for open PRs, plus
+  usually one more for new merges. Around 25 calls for a repo with 200 open
+  PRs, well within the built-in token's hourly limit at a 20-minute schedule.
+- **Merged history:** the first run backfills every merged PR (merged/50
+  calls, resumed over several runs for very large repos); later runs only add
+  new merges. It's published as `data/history.json` (number, title, author,
+  times, merger, first-response time) and loaded only by the Trends view.
 - **Conflict tracking:** GitHub has no event for "a conflict started" or
   "was resolved", so each run compares mergeability with the previous run.
-  The previous state is read back from the published site, so there's nothing
-  extra to store. The first run starts the clock at that run.
+  The previous state (and the history) is read back from the published site,
+  so there's nothing extra to store. Conflicts that already existed before the
+  first run show their start as unknown.
 - **Keepalive:** GitHub pauses scheduled workflows in a public repo after 60
   days without activity. The workflow pushes an empty commit if nothing has
   been committed for 50 days.
