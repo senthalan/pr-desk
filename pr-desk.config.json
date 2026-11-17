@@ -1,0 +1,73 @@
+{
+  "$schema": "./pr-desk.config.schema.json",
+  "title": "ThunderID PR desk",
+  "description": "Open pull requests to ThunderID, by whose turn it is. Community contributions first.",
+  "repos": [
+    "thunder-id/thunderid"
+  ],
+  "groups": [
+    {
+      "key": "wso2",
+      "label": "WSO2",
+      "members": [
+        "darshanasbg",
+        "senthalan",
+        "KaveeshaPiumini",
+        "thiva-k",
+        "ThumulaPerera",
+        "JeethJJ",
+        "ThaminduDilshan",
+        "rajithacharith",
+        "brionmario",
+        "jeradrutnam",
+        "DonOmalVindula",
+        "sahandilshan",
+        "NutharaNR",
+        "sadilchamishka",
+        "Malith-19",
+        "Dilusha-Madushan",
+        "anushasunkada",
+        "indeewari",
+        "JayaShakthi97",
+        "madurangasiriwardena",
+        "UdeshAthukorala",
+        "ImalshaD",
+        "ZiyamSanthosh",
+        "AnuradhaSK",
+        "Osara-B",
+        "NipuniBhagya",
+        "Thumimku",
+        "ayshsandu",
+        "hwupathum",
+        "pavinduLakshan",
+        "RushanNanayakkara",
+        "piraveena",
+        "Yathusiga27",
+        "RandithaK"
+      ],
+      "match": [
+        "wso2"
+      ]
+    }
+  ],
+  "community": {
+    "label": "Community",
+    "members": []
+  },
+  "defaultView": "community",
+  "targets": {
+    "firstReviewDays": 2,
+    "reReviewDays": 2,
+    "mergeDays": 1
+  },
+  "businessDays": {
+    "timezone": "Asia/Colombo",
+    "weekendDays": [
+      5,
+      6
+    ]
+  },
+  "recentMergedDays": 14,
+  "historyDays": 30,
+  "bots": []
+}

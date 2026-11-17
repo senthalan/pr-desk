@@ -1,0 +1,50 @@
+{
+  "$schema": "../pr-desk.config.schema.json",
+  "title": "Acme PR desk",
+  "description": "Open pull requests to Acme projects, by whose turn it is.",
+  "repos": [
+    "acme/widget",
+    "acme/widget-docs"
+  ],
+  "groups": [
+    {
+      "key": "core",
+      "label": "Core team",
+      "members": [
+        "alice",
+        "bob"
+      ],
+      "match": []
+    },
+    {
+      "key": "partner",
+      "label": "Partner Co",
+      "members": [],
+      "match": [
+        "partnerco"
+      ]
+    }
+  ],
+  "community": {
+    "label": "Community",
+    "members": []
+  },
+  "defaultView": "community",
+  "targets": {
+    "firstReviewDays": 2,
+    "reReviewDays": 2,
+    "mergeDays": 1
+  },
+  "businessDays": {
+    "timezone": "Europe/Berlin",
+    "weekendDays": [
+      5,
+      6
+    ]
+  },
+  "recentMergedDays": 14,
+  "historyDays": 30,
+  "bots": [
+    "acme-release-bot"
+  ]
+}
