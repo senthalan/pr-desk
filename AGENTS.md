@@ -52,14 +52,14 @@ src/
   lib/trends.ts              pure: monthly and per-group stats from history.json
   lib/bots.ts                bot detection (built-in list + config `bots`)
   App.tsx                    page shell, data loading, filters, URL state
-  components/                Queue, Board, Drawer, Trends, Parts (shared pills, chips, avatars)
+  components/                Queue, Drawer, Trends, Parts (shared pills, chips, avatars)
 .github/workflows/pr-desk.yml  schedule → sync → build → deploy (+ keepalive)
 ```
 
 ## Data flow
 
 ```
-every 20 min (and on push / manual run)
+every 20 min, best effort (and on push / manual run)
   restore state.json + history.json from the LIVE site (curl)
   npm run check-config
   npm run sync     → public/data/pr-board.json   open PRs + config      (page loads first)
@@ -175,7 +175,7 @@ Definitions that matter:
 
 ## Views
 
-- **Queue / Board**: open PRs only (drafts behind a toggle). No merged PRs —
+- **Queue**: open PRs only (drafts behind a toggle). No merged PRs —
   those live in Trends. Queue sections: *Approved · conflicts* pinned first,
   then *Waiting on us*, then *Waiting on author*; sorted past-target first,
   then longest wait.
@@ -184,6 +184,9 @@ Definitions that matter:
   first-response-per-month lines, monthly data table. Clicking a month (or
   Enter on a focused bar) lists that month's merged PRs. Follows the group tab
   and repo filter.
+  Reached from the **Trends** button in the header (it flips to "← Open PRs")
+  or the first-response tile. There used to be a Board (kanban) view; it was
+  dropped, and an old `?view=board` link opens the queue.
 - **Drawer**: stage, turn, wait, conflict times, group (with an "edit the
   config" link for unlisted authors), approvers / reviewers / commenters /
   requested, last 60 timeline events.
@@ -234,9 +237,14 @@ an error instead of misreading an old file, and the sync discards an old
   pushing.
 - **Every push to `main` redeploys** the public site (the workflow runs on
   push, except Markdown-only changes).
-- **Scheduled runs may lag** on a new repo, and GitHub disables schedules
-  after 60 days without activity; the `keepalive` job pushes an empty commit
-  after 50 quiet days.
+- **Scheduled runs are best effort.** On this repo a `*/20` cron fired only
+  every 5-6 h. The cron uses `7,27,47` to stay off the top of the hour, which
+  GitHub says is the busiest. Don't "fix" this with a workflow that sleeps in
+  a loop and re-dispatches itself: it holds a runner all day for a few seconds
+  of work. If a guaranteed interval is needed, trigger `workflow_dispatch`
+  from an outside scheduler.
+- GitHub disables schedules after 60 days without activity; the `keepalive`
+  job pushes an empty commit after 50 quiet days.
 - **Pages caches for ~10 minutes**; the page re-fetches data every 5 minutes.
 - **Local tokens can see more than CI's.** Never add data to the published
   files that only some tokens can read (see the profile lesson above).

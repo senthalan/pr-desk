@@ -34,13 +34,14 @@ On top of that:
   half the target and red past it.
 - **Badges:** rebased, conflict resolved, was approved, pushed after approval,
   changes requested, CI failing.
-- **Queue and Board views**, a reviewer filter ("my queue"), and a detail
+- **Queue** of open PRs, a reviewer filter ("my queue"), and a detail
   drawer with each PR's recent activity. Filters are kept in the URL, so
   `?reviewer=your-login` is a bookmarkable personal queue.
 - **Trends** over your whole merged history: merged PRs per month, median
   time to first response per month, and per-group figures (first response
   median and p90, share answered within target, time to merge) for the last
-  90 days, 6 months, 12 months or all time. Click a month in either chart to
+  90 days, 6 months, 12 months or all time (the **Trends** button at the top,
+  or the first-response tile). Click a month in either chart to
   list the PRs merged that month, with who merged them, time to first
   response and time to merge.
 
@@ -48,7 +49,7 @@ On top of that:
 
 | View | Shows |
 | --- | --- |
-| **Queue** and **Board** | Every open PR (drafts behind a toggle). No merged PRs. |
+| **Queue** | Every open PR (drafts behind a toggle). No merged PRs. |
 | **Trends** | Every merged PR since the repo's first one, by month and group. |
 
 Bot PRs (Dependabot, Copilot, your `bots` list, …) are left out everywhere,
@@ -64,7 +65,7 @@ so counts are a little lower than GitHub's.
    [`examples/pr-desk.config.example.json`](examples/pr-desk.config.example.json).
 3. **Turn on Pages.** Settings → Pages → Source: **GitHub Actions**.
 4. **Run it.** Actions → **Sync and publish** → **Run workflow**, or just push
-   a commit. After that it runs every 20 minutes on its own.
+   a commit. After that it runs on a 20-minute schedule on its own.
 
 Your desk is then at `https://<owner>.github.io/<repo>/`.
 
@@ -124,7 +125,7 @@ the page is public unless your plan supports private Pages.
 ## How it works
 
 ```
-schedule (every 20 min)
+schedule (every 20 min, best effort)
   └─ npm run sync      scripts/sync.ts → public/data/pr-board.json, history.json, state.json
   └─ npm run build     Vite → dist/
   └─ deploy            GitHub Pages
@@ -145,6 +146,11 @@ browser
   The previous state (and the history) is read back from the published site,
   so there's nothing extra to store. Conflicts that already existed before the
   first run show their start as unknown.
+- **Schedule is best effort:** GitHub delays or drops scheduled runs under
+  load, so on a quiet repo the 20-minute cron may fire far less often (we've
+  seen every 5-6 hours). The cron avoids the top of the hour, which is the
+  busiest. For a guaranteed interval, have an outside scheduler call the
+  workflow's `workflow_dispatch` API; don't keep a runner sleeping in a loop.
 - **Keepalive:** GitHub pauses scheduled workflows in a public repo after 60
   days without activity. The workflow pushes an empty commit if nothing has
   been committed for 50 days.

@@ -13,12 +13,11 @@ import { HISTORY_VERSION, SNAPSHOT_VERSION, type HistoryFile, type Snapshot } fr
 import { computeTrends } from "./lib/trends";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Queue, type QueueSection } from "./components/Queue";
-import { Board } from "./components/Board";
 import { Drawer } from "./components/Drawer";
 import { Trends } from "./components/Trends";
 import { STAGE_TONE, TONE_CLASSES, formatHours, formatRelative, formatSpan, reviewSide } from "./components/Parts";
 
-type View = "queue" | "board" | "trends";
+type View = "queue" | "trends";
 const ALL = "all";
 const DATA_URL = `${import.meta.env.BASE_URL}data/pr-board.json`;
 const HISTORY_URL = `${import.meta.env.BASE_URL}data/history.json`;
@@ -70,7 +69,8 @@ export function App() {
   });
   const [view, setView] = useState<View>(() => {
     const v = readQuery().get("view") ?? readPref("prdesk.view");
-    return v === "board" || v === "trends" ? v : "queue";
+    // "board" was a view until it was dropped; old links fall back to the queue.
+    return v === "trends" ? "trends" : "queue";
   });
   const [history, setHistory] = useState<HistoryFile | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -208,7 +208,6 @@ export function App() {
       onUs: onUs.length,
       breach: active.filter((p) => p.sla === "breach").length,
       approvedConflict: active.filter((p) => p.stage === "approved_conflict").length,
-      approvedConflictFixable: active.filter((p) => p.stage === "approved_conflict" && p.maintainerCanModify).length,
       oldest: onUs.reduce<number | null>((m, p) => Math.max(m ?? 0, p.waitingBusinessDays ?? 0), null),
     };
   }, [inScope]);
@@ -242,6 +241,12 @@ export function App() {
     ];
   }, [stage, filtered, byStage, showDrafts]);
 
+  const switchView = (v: View) => {
+    setView(v);
+    writePref("prdesk.view", v);
+    window.scrollTo({ top: 0 });
+  };
+
   const openPr = openId ? derived.find((p) => p.id === openId) ?? null : null;
   const stats = recent?.byGroup[activeGroup === ALL ? "all" : activeGroup];
   const configUrl = snap?.host ? `https://github.com/${snap.host}/edit/main/pr-desk.config.json` : null;
@@ -272,7 +277,13 @@ export function App() {
             ))}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => switchView(view === "trends" ? "queue" : "trends")}
+            className="px-3 py-1.5 rounded border border-border bg-panel text-sm hover:border-muted"
+          >
+            {view === "trends" ? "← Open PRs" : "Trends"}
+          </button>
           <span className="text-xs text-muted" title={new Date(snap.generatedAt).toLocaleString()}>
             Synced {formatRelative(snap.generatedAt)}
           </span>
@@ -319,21 +330,6 @@ export function App() {
               ))}
             </select>
           )}
-          <div className="inline-flex rounded border border-border overflow-hidden" role="group" aria-label="View">
-            {(["queue", "board", "trends"] as View[]).map((v) => (
-              <button
-                key={v}
-                onClick={() => {
-                  setView(v);
-                  writePref("prdesk.view", v);
-                }}
-                aria-pressed={view === v}
-                className={`px-3 py-1.5 text-sm ${view === v ? "bg-panel text-fg" : "text-muted hover:text-fg"}`}
-              >
-                {v === "queue" ? "Queue" : v === "board" ? "Board" : "Trends"}
-              </button>
-            ))}
-          </div>
         </div>
       </nav>
 
@@ -351,7 +347,6 @@ export function App() {
           label="Approved · conflicts"
           value={String(kpis.approvedConflict)}
           tone={kpis.approvedConflict > 0 ? "danger" : undefined}
-          sub={kpis.approvedConflict > 0 ? `${kpis.approvedConflictFixable} we can rebase` : undefined}
           onClick={() => setStage(stage === "approved_conflict" ? null : "approved_conflict")}
         />
         <Kpi label="Longest wait on us" value={formatSpan(kpis.oldest)} sub="business days" />
@@ -360,10 +355,7 @@ export function App() {
           value={stats?.p90FirstResponseH != null ? `p90 ${formatHours(stats.p90FirstResponseH)}` : "—"}
           sub={stats ? `median ${formatHours(stats.medianFirstResponseH)} · ${stats.merged} merged PRs` : history ? "no merged PRs" : "loading…"}
           hint="Time from opening to the first review or comment by someone other than the author, for PRs merged in the last 90 days. See Trends for more."
-          onClick={() => {
-            setView("trends");
-            writePref("prdesk.view", "trends");
-          }}
+          onClick={() => switchView("trends")}
         />
       </section>
 
@@ -428,17 +420,8 @@ export function App() {
 
       {view === "trends" ? (
         <Trends history={history} error={historyError} config={snap.config} group={activeGroup} repo={repo || null} now={now} />
-      ) : view === "queue" ? (
-        <Queue sections={sections} groupLabel={labelOf} showGroup={activeGroup === ALL} showRepo={multiRepo} onOpen={(p) => setOpenId(p.id)} />
       ) : (
-        <Board
-          columns={[...(stage ? [stage] : STAGE_ORDER), ...(showDrafts && !stage ? (["draft"] as Stage[]) : [])].map((s) => ({
-            stage: s,
-            prs: byStage.get(s) ?? [],
-          }))}
-          showRepo={multiRepo}
-          onOpen={(p) => setOpenId(p.id)}
-        />
+        <Queue sections={sections} groupLabel={labelOf} showGroup={activeGroup === ALL} showRepo={multiRepo} onOpen={(p) => setOpenId(p.id)} />
       )}
 
       <footer className="mt-10 pt-4 border-t border-border text-xs text-muted flex flex-wrap gap-x-4 gap-y-1">

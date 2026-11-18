@@ -161,9 +161,6 @@ export function PrBadges({ pr }: { pr: DerivedPr }) {
   const b = pr.badges;
   return (
     <>
-      {pr.stage === "approved_conflict" && pr.maintainerCanModify && (
-        <Pill tone="danger" title={TURN_HINTS.team}>we can rebase</Pill>
-      )}
       {b.wasApproved && (
         <Pill tone="ok" title="This PR was approved before; the approval was dismissed or superseded by a later update">
           was approved
